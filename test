@@ -1,0 +1,404 @@
+import {useState, useEffect, useCallback} from "react";
+import ReactMarkdown from "react-markdown";
+import {toast, ToastContainer} from "react-toastify";
+import Lottie from "lottie-react";
+import ImgBg from "@assets/ghost1.json";
+import {motion} from "framer-motion";
+import {getAllQuestions, getHints, submitFlag,getSolvedById} from "@api/auth";
+import "./output.css"
+import { getCookies } from "cookies-next";
+import dynamic from "next/dynamic";
+const ReactEmbedGist = dynamic(() => import("react-embed-gist"), {
+    ssr: false,
+});
+
+const QuestionCard = ({question, index, func: openModal}) => {
+    const [hovered, setIsHovered] = useState(false);
+
+    return (
+        <motion.div
+            onHoverStart={() => {
+                setIsHovered(true);
+            }}
+            onHoverEnd={() => {
+                setIsHovered(false);
+            }}
+            key={question._id}
+            className={`
+            p-5 border flex flex-col justify-between rounded-lg cursor-pointer w-full shadow-md bg-blue-100 bg-opacity-90 hover:bg-blue-300 hover:bg-opacity-60
+            text-white text-2xl font-medium leading-tight relative transition-all duration-300 ease-in-out ${
+                hovered ? "scale-110 bg-blue-50 bg-opacity-80" : ""
+            }`}
+            onClick={() => openModal(question)}
+        >
+            {hovered && (
+                <Lottie
+                    className="bg-opacity-0 absolute w-[100px] h-[100px] z-10 top-0 right-0"
+                    animationData={ImgBg}
+                    loop={true}
+                />
+            )}
+            <p className="font-bold text-primary-500 md:text-xl text-2xl flex gap-2 text-gray-800 mb-5 mt-4">
+                Question {index + 1}
+            </p>
+            <h2 className="md:text-xl text-2xl mb-4 tracking-wider text-gray-800">
+                {question.qtitle}
+            </h2>
+            <div
+                className="text-primary-300 bg-blue-400 py-2 px-3 rounded-full text-xl tracking-wide opacity-80 text-white">
+                Points: {question.points}
+            </div>
+        </motion.div>
+    );
+};
+
+export default function QuestionTable() {
+    const {team_id}= getCookies();
+  const [solvedQuestions, setSolvedQuestions] = useState([]);
+   const [questions, setQuestions] = useState([]);
+   const [selectedQuestion, setSelectedQuestion] = useState(null);
+   const [answer, setAnswer] = useState("");
+   const [hintsOpen, setHintsOpen] = useState(false);
+   const [selectedHint, setSelectedHint] = useState("");
+
+   const [hint1, setHint1] = useState("");
+   const [hint2, setHint2] = useState("");
+   const [hint3, setHint3] = useState("");
+const fetchHint = useCallback(
+  (hintNumber) => {
+    getHints(selectedQuestion.question_id, hintNumber)
+      .then((response) => {
+        if(response.message)
+        {
+          toast.error(response.message, {
+            className: "text-white font-primary bg-black",
+          });
+        }
+        switch (hintNumber) {
+          case 1:
+            setSelectedHint(response.clue);
+            setHint1(response.clue);
+            break;
+          case 2:
+            setSelectedHint(response.clue);
+            setHint2(response.clue);
+            break;
+          case 3:
+            setSelectedHint(response.clue);
+            setHint3(response.clue);
+            break;
+          default:
+            break;
+        }
+
+        // Update local storage after setting hints in state
+        const hintStorageKey = `${team_id}_${selectedQuestion.question_id}_hints`;
+        const hintsInStorage =
+          JSON.parse(localStorage.getItem(hintStorageKey)) || {};
+        hintsInStorage[hintNumber] = response.clue;
+        localStorage.setItem(hintStorageKey, JSON.stringify(hintsInStorage));
+      })
+      .catch((error) => {
+        toast.error(error.response.data.message, {
+          className: "text-black font-primary bg-white",
+          position: "top-center",
+        });
+      });
+  },
+  [selectedQuestion]
+);
+
+ useEffect(() => {
+    getSolvedById()
+      .then((response) => {
+        setSolvedQuestions(response);
+      })
+      .catch((error) => {
+        console.error("Error fetching solved questions: ", error);
+      });
+  }, []);
+
+  useEffect(() => {
+    getAllQuestions()
+      .then((response) => {
+        const unsolvedQuestions = response.filter((question) => {
+          return !solvedQuestions.some(
+            (solvedQuestion) =>
+              solvedQuestion.question_id === question.question_id &&
+              solvedQuestion.team_id === team_id
+          );
+        });
+        setQuestions(unsolvedQuestions);
+      })
+      .catch((error) => {
+        console.error("Error fetching all questions: ", error);
+      });
+  }, [solvedQuestions, team_id]);
+
+    const openModal = useCallback((question) => {
+         const hintStorageKey = `${team_id}_${question.question_id}_hints`;
+         const hintsInStorage =
+           JSON.parse(localStorage.getItem(hintStorageKey)) || {};
+         setHint1(hintsInStorage[1] || "");
+         setHint2(hintsInStorage[2] || "");
+         setHint3(hintsInStorage[3] || "");
+        setSelectedQuestion(question);
+    }, []);
+
+    const closeModal = useCallback(() => {
+        setSelectedQuestion(null);
+        setHintsOpen(false);
+        setHint1("");
+        setHint2("");
+        setHint3("");
+    }, []);
+
+    const submitAnswer = useCallback(() => {
+      if (!answer) {
+        toast.error("CAN NOT SUBMIT BLANK ANSWER", {
+          className: "text-white font-primary bg-black"
+        });
+        closeModal();
+      } else {
+        submitFlag(selectedQuestion.question_id, answer)
+          .then((response) => {
+            toast(response.message, {
+              className: "text-white font-primary bg-black"
+            });
+            if (response.message==="Question Solved Successfully") {
+
+                 const updatedQuestions = questions.filter((question) => question.question_id !== selectedQuestion.question_id);
+                 setQuestions(updatedQuestions);
+               }
+
+            closeModal();
+            setAnswer("");
+          })
+          .catch((error) => {
+            toast.error(error.response.data.message || "An error occurred", {
+              className: "text-white font-primary bg-black"
+            });
+            closeModal();
+            setAnswer("");
+          });
+      }
+    }, [answer, closeModal, selectedQuestion, questions]);
+
+    const setHint = useCallback((hint) => {
+        setSelectedHint(hint);
+        setHintsOpen(true);
+    }, []);
+      const closeModalOnOutsideClick = (e) => {
+
+        if (
+          e.target.classList.contains("fixed") &&
+          e.target.classList.contains("bg-blue-50")
+        ) {
+          closeModal();
+        }
+      };
+
+      useEffect(() => {
+
+        document.addEventListener("click", closeModalOnOutsideClick);
+
+
+        return () => {
+          document.removeEventListener("click", closeModalOnOutsideClick);
+        };
+      }, []);
+
+    return (
+      <div className="container mx-auto p-4  text-white">
+        <ToastContainer></ToastContainer>
+        <h1 className="sm:text-3xl text-xl   font-bold mb-6 font-primary text-secondary text-center tracking-wider">
+          QUESTS
+        </h1>
+
+        <div className="grid sm:grid-cols-3 grid-cols-1 gap-8">
+          {questions?.map((question, index) => (
+            <QuestionCard
+              question={question}
+              index={index}
+              key={index.toString()}
+              func={openModal}
+            />
+          ))}
+        </div>
+
+        {selectedQuestion && (
+          <>
+            <div className="fixed top-0 left-0 w-full h-full flex items-center justify-center bg-blue-50 p-4 bg-opacity-95 z-30">
+              <div className="bg-blue-300 py-6 max-w-5xl px-6 rounded-lg shadow-lg relative z-50 h-auto no-scrollbar overflow-scroll sm:overflow-auto backdrop-filter bg-opacity-90 border border-gray-400">
+                <button
+                  className="absolute top-5 right-2 pt-1 pb-1 pr-3 pl-3 cursor-pointer text-white font-bold text-lg bg-blue-700 rounded-full"
+                  onClick={closeModal}
+                >
+                  x
+                </button>
+
+                <div className="flex flex-col">
+                  <div>
+                    <div className="mt-8 mb-6">
+                      <h2 className="sm:text-3xl text-xl font-primary font-bold mb-4 tracking-wider text-center text-white">
+                        {selectedQuestion.qtitle}
+                      </h2>
+                      <div className="flex justify-end gap-4 items-end">
+                        <div className="text-gray-800  text-sm font-bold flex gap-4">
+                          <div className="sm:text-xl font-primary text-xl text-white ">
+                            Points:
+                          </div>{" "}
+                          <div className="sm:text-xl font-bold text-xl text-white ">
+                            {selectedQuestion.points}
+                          </div>{" "}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mb-2">
+                    <div className="mb-4 flex flex-col  text-gray-800">
+                      <div>
+                        <div className="mb-4">
+                          <div className="sm:text-xl font-primary font-semibold text-xl">
+                            Catch Phrase:
+                          </div>{" "}
+                          <p className="text-gray-800 sm:text-xl font-primary text-xl">
+                            {selectedQuestion.qcatchphrase}
+                          </p>
+                        </div>
+                        <div className="pr-2">
+                          <div className="sm:text-xl font-primary font-semibold text-gray-800  text-xl">
+                            Description:
+                          </div>{" "}
+                          <ReactMarkdown className="text-gray-800  sm:text-xl font-primary text-xl">
+                            {selectedQuestion.qdesc}
+                          </ReactMarkdown>
+                        </div>
+                        <div className="sm:text-xl font-primary font-semibold text-xl mt-4">
+                          Link:
+                        </div>
+                        <a
+                          href={selectedQuestion.link}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-blue-500 hover:underline text-xl"
+                        >
+                          {selectedQuestion.link}
+                        </a>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div>
+                        <div className="mx-4 pt-1 justify-center items-center flex flex-col text-white">
+                          <div className="text-center font-primary text-gray-800 sm:text-2xl text-lg">
+                            ☃️ Hints ☃️
+                          </div>
+                          <div className="mx-4 pt-1 flex flex-col sm:flex-row justify-center items-center text-white">
+                            <div className="pt-1 mx-3 rounded">
+                              <div
+                                className="flex space-x-4"
+                                style={{
+                                  maxHeight: "20vh",
+                                  overflowY: "scroll",
+                                }}
+                              >
+                                <div className="font-primary p-2 rounded">
+                                  <button
+                                    onClick={() => {
+                                      if (hint1 === "") {
+                                        if (
+                                          confirm(
+                                            "Are you sure you want to take the hint and penalty on score?"
+                                          )
+                                        )
+                                          fetchHint(1);
+                                        else return;
+                                      }
+                                      setHint(hint1);
+                                    }}
+                                    className="btn text-white bg-blue-400 text-center"
+                                  >
+                                    😃 -{selectedQuestion.points * 0.1} points
+                                  </button>
+                                </div>
+                                <div className="font-primary p-2 rounded">
+                                  <button
+                                    onClick={() => {
+                                      if (hint2 === "") {
+                                        if (
+                                          confirm(
+                                            "Are you sure you want to take the hint and penalty on score?"
+                                          )
+                                        )
+                                          fetchHint(2);
+                                        else return;
+                                      }
+                                      setHint(hint2);
+                                    }}
+                                    className="btn text-white bg-blue-400 text-center"
+                                    disabled={hint1 === ""}
+                                  >
+                                    😐 -{selectedQuestion.points * 0.2} points
+                                  </button>
+                                </div>
+                                <div className=" font-primary p-2 rounded">
+                                  <button
+                                    onClick={() => {
+                                      if (hint3 === "") {
+                                        if (
+                                          confirm(
+                                            "Are you sure you want to take the hint and penalty on score?"
+                                          )
+                                        )
+                                          fetchHint(3);
+                                        else return;
+                                      }
+                                      setHint(hint3);
+                                    }}
+                                    className="btn text-white bg-blue-400  text-center"
+                                    disabled={hint2 === ""}
+                                  >
+                                    😶 -{selectedQuestion.points * 0.3} points
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          {hintsOpen && (
+                            <>
+                              <div className="text-gray-800 p-2 max-w-sm mt-2">
+                                {selectedHint}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex sm:flex-row flex-col gap-3 items-center font-primary mb-2">
+                    <input
+                      type="text"
+                      id="answer"
+                      placeholder="Enter the Flag here - ritctf{}"
+                      value={answer}
+                      onChange={(e) => setAnswer(e.target.value)}
+                      className="border rounded p-3 w-full pb-4 bg-white text-gray-800 font-primary"
+                    />
+                    <button
+                      onClick={submitAnswer}
+                      className="bg-blue-400 text-white w-60 h-16 rounded-full hover:from-blue-800 hover:to-blue-900 text-sm font-bold shadow-md transition duration-300 ease-in-out"
+                    >
+                      Submit
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    );
+}
